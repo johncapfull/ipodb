@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # audio file information library for rePear, the iPod database management tool
 # Copyright (C) 2006-2008 Martin J. Fiedler <martin.fiedler@gmx.net>
@@ -133,11 +133,11 @@ def GetID3v1(f, info):
         return 0
     info['tag'] = "id3v1"
     field = data[3:33].split("\0",1)[0].strip()
-    if field: info['title'] = unicode(field, sys.getfilesystemencoding(), 'replace')
+    if field: info['title'] = str(field, sys.getfilesystemencoding(), 'replace')
     field = data[33:63].split("\0",1)[0].strip()
-    if field: info['artist'] = unicode(field, sys.getfilesystemencoding(), 'replace')
+    if field: info['artist'] = str(field, sys.getfilesystemencoding(), 'replace')
     field = data[63:93].split("\0",1)[0].strip()
-    if field: info['album'] = unicode(field, sys.getfilesystemencoding(), 'replace')
+    if field: info['album'] = str(field, sys.getfilesystemencoding(), 'replace')
     field = data[93:97].split("\0",1)[0].strip()
     if field:
         try:
@@ -145,7 +145,7 @@ def GetID3v1(f, info):
         except ValueError:
             pass
     field = data[97:127].split("\0",1)[0].strip()
-    if field: info['comment'] = unicode(field, sys.getfilesystemencoding(), 'replace')
+    if field: info['comment'] = str(field, sys.getfilesystemencoding(), 'replace')
     if data[125]=='\0' and data[126]!='\0':
         info['track number'] = ord(data[126])
     try:
@@ -250,17 +250,17 @@ def HandleID3v2Frame(frame, payload, flags, info):
     if frame[0]=='T' and frame!="TXXX":
         # text frame
         charset = GetCharset(payload[0])
-        text = unicode(payload[1:], charset, 'replace').split(u'\0', 1)[0]
+        text = str(payload[1:], charset, 'replace').split('\0', 1)[0]
 
     elif frame[0]=='W' and frame!="WXXX":
         # URL
-        text = unicode(payload.split("\0", 1)[0], "iso-8859-1", 'replace')
+        text = str(payload.split("\0", 1)[0], "iso-8859-1", 'replace')
 
     elif frame=="COMM":
         # comment
         charset = GetCharset(payload[0])
         lang = payload[1:4].split("\0", 1)[0]
-        parts = unicode(payload[4:], charset, 'replace').split(u'\0', 2)
+        parts = str(payload[4:], charset, 'replace').split('\0', 2)
         if len(parts)<2: return  # broken frame
         text = parts[1]
 
@@ -312,7 +312,7 @@ def DecodeVorbisHeader(f, info):
 
     # encoder version
     size = struct.unpack("<L", data[:4])[0]
-    if size: info['encoder'] = unicode(data[4:size+4], "utf_8", 'replace')
+    if size: info['encoder'] = str(data[4:size+4], "utf_8", 'replace')
     data = data[size+4:]
 
     # field count
@@ -321,7 +321,7 @@ def DecodeVorbisHeader(f, info):
     data = data[4:]
 
     # field data
-    for i in xrange(count):
+    for i in range(count):
         if len(data)<4: break  # comment packet too short
         size = struct.unpack("<L", data[:4])[0]
         if size:
@@ -335,7 +335,7 @@ def DecodeVorbisHeader(f, info):
                     except ValueError:
                         pass
                 else:
-                    info[key.lower()] = unicode(value, "utf_8", 'replace')
+                    info[key.lower()] = str(value, "utf_8", 'replace')
         data = data[size+4:]
 
     return True
@@ -376,7 +376,7 @@ def ScanMP3(f, info, start_offset=0):
         while True:
             pos = sample.find("\xff", pos)
             if pos<0: return False
-            if IsValidMP3Header(map(ord, sample[pos:pos+4])): break
+            if IsValidMP3Header(list(map(ord, sample[pos:pos+4]))): break
             pos += 1
         f.seek(start_offset + pos)
 
@@ -400,7 +400,7 @@ def ScanMP3(f, info, start_offset=0):
         if len(header)!=4: break
 
         # reject frames that do not look like MP3
-        header = map(ord, header)
+        header = list(map(ord, header))
         if not IsValidMP3Header(header):
             # OK, this file is broken. try to re-synchronize.
             resync_pos = f.tell()
@@ -587,21 +587,21 @@ def GetAudioFileInfo(filename, stat_only=False):
 
 if __name__=="__main__":
     if len(sys.argv)<2:
-        print "Usage:", sys.argv[0], "<FILES>..."
+        print("Usage:", sys.argv[0], "<FILES>...")
         sys.exit(1)
     for filename in sys.argv[1:]:
-        print
-        print "[%s]" % filename
+        print()
+        print("[%s]" % filename)
         info = GetAudioFileInfo(filename)
         if not info: continue
-        keys = info.keys()
+        keys = list(info.keys())
         keys.sort()
-        fmt = "%%-%ds= %%s" % (max(map(len, keys)) + 1)
+        fmt = "%%-%ds= %%s" % (max(list(map(len, keys))) + 1)
         for key in keys:
             value = info[key]
             try:
                 value = value.encode('iso-8859-1', 'replace')
             except:
                 pass
-            print fmt % (key, value)
-        print
+            print(fmt % (key, value))
+        print()

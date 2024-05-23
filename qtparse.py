@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # QuickTime parser library for rePear, the iPod database management tool
 # Copyright (C) 2006-2008 Martin J. Fiedler <martin.fiedler@gmx.net>
@@ -184,9 +184,9 @@ class QTParser:
     def log_path(self, path, atom, size, start=None):
         if not self.verbose: return
         if start is None:
-            print "%s%s (%d bytes)" % ("  " * len(path), atom, size)
+            print("%s%s (%d bytes)" % ("  " * len(path), atom, size))
         else:
-            print "%s%s (%d bytes @ %d)" % ("  " * len(path), atom, size, start)
+            print("%s%s (%d bytes @ %d)" % ("  " * len(path), atom, size, start))
 
     def err(self, path, message):
         self.errors.append((self.repr_path(path), message))
@@ -286,7 +286,7 @@ class QTParser:
         end = start + size
         start += 8
         media_type = self.gettrack('type')
-        for i in xrange(count):
+        for i in range(count):
             if start > (end - 16):
                 return self.err(path, "description #%d too small" % (i+1))
             self.f.seek(start)
@@ -489,9 +489,9 @@ class QTParser:
     def format_text(self, path, data):
         data = data.strip("\0")
         if data.startswith("\xfeff"):
-            return unicode(data, 'utf_16')
+            return str(data, 'utf_16')
         else:
-            return unicode(data, 'utf_8')
+            return str(data, 'utf_8')
 
     def format_year(self, path, data):
         data = data.strip("\0").split('-', 1)[0]
@@ -530,7 +530,7 @@ class QTParser:
         info = {}
         have_video = False
         have_audio = False
-        for track in self.tracks.itervalues():
+        for track in self.tracks.values():
             ttype = track.get('type', '?')
             if not(have_audio) and (ttype == 'audio'):
                 ainfo = track.copy()
@@ -555,27 +555,27 @@ class QTParser:
 ################################################################################
 
 def dump_dict(d):
-    keys = d.keys()
+    keys = list(d.keys())
     keys.sort()
     for key in keys:
-        print "    %s = %s" % (key, repr(d[key]))
+        print("    %s = %s" % (key, repr(d[key])))
 
 if __name__ == "__main__":
     qt = QTParser(file(sys.argv[1], "rb"), True)
-    print
+    print()
     
-    print "Raw file information:"
+    print("Raw file information:")
     dump_dict(qt.info)
     for track in qt.tracks:
-        print "Raw track information (id %s):" % track
+        print("Raw track information (id %s):" % track)
         dump_dict(qt.tracks[track])
-    print
+    print()
     
-    print "rePear-compliant information:"
+    print("rePear-compliant information:")
     dump_dict(qt.get_repear_info())
-    print
+    print()
 
     if qt.errors:
-        print "Errors:"
-        for e in qt.errors: print "    %s: %s" % e
-        print
+        print("Errors:")
+        for e in qt.errors: print("    %s: %s" % e)
+        print()

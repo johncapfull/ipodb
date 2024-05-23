@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # iTunesDB generator library for rePear, the iPod database management tool
 # Copyright (C) 2006-2008 Martin J. Fiedler <martin.fiedler@gmx.net>
@@ -17,7 +17,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-import struct, random, types, array, sys, os, stat, time
+import struct, random, types, array, sys, os, stat, time, functools
 try:
     import Image, JpegImagePlugin, PngImagePlugin
     PILAvailable = True
@@ -37,20 +37,26 @@ log = DefaultLoggingFunction
 ################################################################################
 
 class Field:
-    def __str__(self): raise Exception, "abstract function call"
-    def __len__(self): raise Exception, "abstract function call"
+    def bytes(self): raise Exception("abstract function call")
+    def size(self): raise Exception("abstract function call")
+    def __str__(self): raise Exception("__str__ is not supported anymore here")
+    def __len__(self): raise Exception("__len__ is not supported anymore here")
 
 class F_Tag(Field):
-    def __init__(self, tag): self.tag = tag
-    def __str__(self): return self.tag
-    def __len__(self): return len(self.tag)
+    def __init__(self, tag):
+        if isinstance(tag, str):
+            self.tag = tag.encode('utf-8')
+        elif isinstance(tag, bytes):
+            self.tag = tag
+    def bytes(self): return self.tag
+    def size(self): return len(self.tag)
 
 class F_Formatable(Field):
     def __init__(self, format, value):
         self.format = format
         self.value = value
-    def __str__(self): return struct.pack("<"+self.format, self.value)
-    def __len__(self): return struct.calcsize(self.format)
+    def bytes(self): return struct.pack("<"+self.format, self.value)
+    def size(self): return struct.calcsize(self.format)
 
 class F_Int64(F_Formatable):
     def __init__(self, value): F_Formatable.__init__(self, "Q", value)
@@ -70,8 +76,8 @@ class F_ChildCount(F_Int32):
 
 class F_Padding(Field):
     def __init__(self, length): self.length = length
-    def __str__(self): return self.length * "\0"
-    def __len__(self): return self.length
+    def bytes(self): return (self.length * "\0").encode('utf-8')
+    def size(self): return self.length
 
 
 class Record:
@@ -79,41 +85,48 @@ class Record:
         self.header_length_at = None
         self.total_length_at = None
         self.child_count_at = None
-        data = ""
+        data = b""
         for field in header:
             if field.__class__ == F_HeaderLength: self.header_length_at = len(data)
             if field.__class__ == F_TotalLength:  self.total_length_at  = len(data)
             if field.__class__ == F_ChildCount:   self.child_count_at   = len(data)
-            data += str(field)
+            data += field.bytes()
         if self.header_length_at:
             data = data[:self.header_length_at] + struct.pack("<L", len(data)) + data[self.header_length_at+4:]
         self.data = data
         self.child_count = 0
     def add(self, obj, count=1):
         self.child_count += count
-        self.data += str(obj)
-    def __str__(self):
+        if isinstance(obj, str):
+            self.data += obj.encode('utf-8')
+        elif isinstance(obj, bytes):
+            self.data += obj
+        else:
+            self.data += obj.bytes()
+    def bytes(self):
         data = self.data
         if self.total_length_at:
             data = data[:self.total_length_at] + struct.pack("<L", len(data)) + data[self.total_length_at+4:]
         if self.child_count_at:
             data = data[:self.child_count_at] + struct.pack("<L", self.child_count) + data[self.child_count_at+4:]
         return data
-
+    def __str__(self): raise Exception("__str__ is not supported here anymore")
 
 def kill_unicode(x):
-    if type(x)!=types.UnicodeType: return x
+    if type(x)!=str: return x
     return x.encode(sys.getfilesystemencoding(), 'replace')
 
 
 def make_compare_key(x):
-    if type(x) == types.UnicodeType:
+    if type(x) == str:
         return x.encode(sys.getfilesystemencoding(), 'replace').lower()
-    elif type(x) == types.StringType:
+    elif type(x) == bytes:
         return x.lower()
     else:
         return x
 
+def cmp(a, b):
+    return (a > b) - (a < b)
 
 def compare_dict(a, b, fields):
     for field in fields:
@@ -154,8 +167,8 @@ def compare_mtime(a, b):
 
 class StringDataObject(Record):
     def __init__(self, mhod_type, content):
-        if type(content) != types.UnicodeType:
-            content = unicode(content, sys.getfilesystemencoding(), 'replace')
+        if type(content) != str:
+            content = str(content, sys.getfilesystemencoding(), 'replace')
         content = content.encode('utf_16_le', 'replace')
         Record.__init__(self, (
             F_Tag("mhod"),
@@ -187,7 +200,7 @@ class OrderDataObject(Record):
 class TrackItemRecord(Record):
     def __init__(self, info):
         if not 'id' in info:
-            raise KeyError, "no track ID set"
+            raise KeyError("no track ID set")
         format = info.get('format', "mp3-cbr")
         if info.get('artwork', None):
             default_has_artwork = True
@@ -298,7 +311,7 @@ class PlaylistItemRecord(Record):
 
 class PlaylistRecord(Record):
     def __init__(self, name, track_count, order=0, master=0, timestamp=0, plid=None, sort_order=1):
-        if not plid: plid = random.randrange(0L, 18446744073709551615L)
+        if not plid: plid = random.randrange(0, 18446744073709551615)
         Record.__init__(self, (
             F_Tag("mhyp"),
             F_HeaderLength(),
@@ -318,8 +331,9 @@ class PlaylistRecord(Record):
         self.add(OrderDataObject(order))
 
     def add_index(self, tracklist, index_type, fields):
-        order = range(len(tracklist))
-        order.sort(lambda a,b: compare_dict(tracklist[a], tracklist[b], fields))
+        order = list(range(len(tracklist)))
+        comparator = lambda a,b: compare_dict(tracklist[a], tracklist[b], fields)
+        order.sort(key=functools.cmp_to_key(comparator))
         mhod = Record((
             F_Tag("mhod"),
             F_Int32(24),
@@ -333,14 +347,14 @@ class PlaylistRecord(Record):
         arr = array.array('L', order)
         # the array module doesn't directly support endianness, so we detect
         # the machine's endianness and swap if it is big-endian
-        if ord(array.array('L', [1]).tostring()[3]):
+        if ord(array.array('L', [1]).tobytes()[3]):
             arr.byteswap()
-        data = arr.tostring()
+        data = arr.tobytes()
         mhod.add(data)
         self.add(mhod)
 
     def set_playlist(self, track_ids):
-        for i in xrange(len(track_ids)):
+        for i in range(len(track_ids)):
             self.add(PlaylistItemRecord(i+1, track_ids[i]), 0)
 
 
@@ -351,7 +365,7 @@ class PlaylistRecord(Record):
 
 class iTunesDB:
     def __init__(self, tracklist, name="Unnamed", dbid=None, dbversion=0x19):
-        if not dbid: dbid = random.randrange(0L, 18446744073709551615L)
+        if not dbid: dbid = random.randrange(0, 18446744073709551615)
 
         self.mhbd = Record((
             F_Tag("mhbd"),
@@ -438,9 +452,9 @@ class iTunesDB:
 class RGB565_LE:
     bpp = 16
     def convert(data):
-        res = array.array('B', [0 for x in xrange(len(data)/3*2)])
+        res = array.array('B', [0 for x in range(len(data)/3*2)])
         io = 0
-        for ii in xrange(0, len(data), 3):
+        for ii in range(0, len(data), 3):
             g = ord(data[ii+1]) >> 2
             res[io] = ((g & 7) << 5) | (ord(data[ii+2]) >> 3)
             res[io|1] = (ord(data[ii]) & 0xF8) | (g >> 3)
@@ -503,7 +517,7 @@ class ArtworkFormat:
         # open the destination file
         try:
             self.f = open(self.fullname, "wb")
-        except IOError, e:
+        except IOError as e:
             log("WARNING: Error opening the artwork data file `%s'\n", self.filename)
             self.f = None
 
@@ -567,8 +581,8 @@ class ArtworkFormat:
 
 class ArtworkDBStringDataObject(Record):
     def __init__(self, mhod_type, content):
-        if type(content) != types.UnicodeType:
-            content = unicode(content, sys.getfilesystemencoding(), 'replace')
+        if type(content) != str:
+            content = str(content, sys.getfilesystemencoding(), 'replace')
         content = content.encode('utf_16_le', 'replace')
         padding = len(content) % 4
         if padding: padding = 4 - padding
@@ -639,7 +653,7 @@ class ImageItemRecord(Record):
 
 
 def ArtworkDB(model, imagelist, base_id=0x40, cache_data=({}, {})):
-    while type(ImageFormats.get(model, None)) == types.StringType:
+    while type(ImageFormats.get(model, None)) == bytes:
         model = ImageFormats[model]
     if not model in ImageFormats:
         return None
@@ -674,13 +688,13 @@ def ArtworkDB(model, imagelist, base_id=0x40, cache_data=({}, {})):
     output_image_cache = {}
     image_count = 0
     dbid2mhii = {}
-    for source, dbid_list in imagelist.iteritems():
+    for source, dbid_list in imagelist.items():
         log(source, False)
 
         # stat this image
         try:
             s = os.stat(source)
-        except OSError, e:
+        except OSError as e:
             log(" [Error: %s]\n" % e.strerror, True)
             continue
 
@@ -696,7 +710,7 @@ def ArtworkDB(model, imagelist, base_id=0x40, cache_data=({}, {})):
             try:
                 image = Image.open(source)
                 image.tostring()
-            except IOError, e:
+            except IOError as e:
                 log(" [Error: %s]\n" % e, True)
                 continue
         else:
@@ -823,7 +837,7 @@ class InvalidFormat(Exception): pass
 
 class DatabaseReader:
     def __init__(self, f="iPod_Control/iTunes/iTunesDB"):
-        if type(f)==types.StringType:
+        if type(f)==str:
             f = open(f, "rb")
         self.f = f
         self._skip_header("mhbd")
@@ -849,7 +863,7 @@ class DatabaseReader:
         return hh + self.f.read(size - 8)
 
     def __iter__(self): return self
-    def next(self):
+    def __next__(self):
         try:
             header = self._skip_header("mhit")
         except (IOError, InvalidFormat):
@@ -868,7 +882,7 @@ class DatabaseReader:
         # walk through mhods
         while (len(data) > 40) and (data[:4] == "mhod"):
             size, mhod_type = struct.unpack('<LL', data[8:16])
-            value = unicode(data[40:size], "utf_16_le", 'replace')
+            value = str(data[40:size], "utf_16_le", 'replace')
             if mhod_type in mhod_type_map:
                 info[mhod_type_map[mhod_type]] = value
             data = data[size:]
@@ -895,7 +909,7 @@ class PlayCountsItem:
 
 class PlayCountsReader:
     def __init__(self, f="iPod_Control/iTunes/Play Counts"):
-        if type(f)==types.StringType:
+        if type(f)==str:
             f = open(f, "rb")
         self.f = f
         self.f.seek(0, 2)
@@ -912,7 +926,7 @@ class PlayCountsReader:
         self.index = 0
 
     def __iter__(self): return self
-    def next(self):
+    def __next__(self):
         data = self.f.read(self.entry_size)
         if not data: raise StopIteration
         self.index += 1
@@ -930,9 +944,9 @@ SD_type_map = { "aac": 2, "mp4a": 2, "wave": 4}
 
 def MakeSDEntry(info):
     path = info['path']
-    if type(path) != types.UnicodeType:
-        path = unicode(path, sys.getfilesystemencoding(), 'replace')
-    path = u'/' + path
+    if type(path) != str:
+        path = str(path, sys.getfilesystemencoding(), 'replace')
+    path = '/' + path
     return "\0\x02\x2E\x5A\xA5\x01" + (20*"\0") + \
            "\x64\0\0%c\0\x02\0" % (SD_type_map.get(info.get('type', None), 1)) + \
            path.encode("utf_16_le", 'replace') + \
@@ -951,7 +965,7 @@ def iTunesSD(tracklist):
 
 def GenerateIDs(tracklist):
     trackid = random.randint(0, (0xFFFF-0x1337) - len(tracklist))
-    dbid = random.randrange(0, 18446744073709551615L - len(tracklist))
+    dbid = random.randrange(0, 18446744073709551615 - len(tracklist))
     for track in tracklist:
         track['id'] = trackid
         track['dbid'] = dbid
@@ -965,7 +979,7 @@ def GuessTitleAndArtist(filename):
     filename = os.path.splitext(filename)[0]
     filename = filename.replace('_', ' ')
     n = ""
-    for i in xrange(len(filename)):
+    for i in range(len(filename)):
         c = filename[i]
         if c in "0123456789":
             n += c
@@ -983,7 +997,7 @@ def GuessTitleAndArtist(filename):
     return info
 
 def FillMissingTitleAndArtist(track_or_list):
-    if type(track_or_list)==types.ListType:
+    if type(track_or_list)==list:
         for track in track_or_list:
             FillMissingTitleAndArtist(track)
     else:
@@ -1009,13 +1023,13 @@ def HexDump(obj):
     offset = 0
     while s:
         line = "%08X | " % offset
-        for i in xrange(16):
+        for i in range(16):
             if i < len(s):
                 line += "%02X " % ord(s[i])
             else:
                 line += "   "
         line += "| " + "".join(map(ASCIIMap, s[:16]))
-        print line
+        print(line)
         offset += 16
         s = s[16:]
 
@@ -1032,4 +1046,4 @@ def DisplayTitle(info):
 ################################################################################
 
 if __name__ == "__main__":
-    print "Do not start this file directly, start repear.py instead."
+    print("Do not start this file directly, start repear.py instead.")
